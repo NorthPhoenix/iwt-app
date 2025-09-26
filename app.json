@@ -24,18 +24,15 @@
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE"
-      ]
+      ],
+      "package": "com.northphoenix.intervalwalkingtraining"
     },
     "plugins": [
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
           "color": "#00d4ff",
-          "defaultChannel": "default",
-          "sounds": [
-            "./assets/notification-sound.wav"
-          ]
+          "defaultChannel": "default"
         }
       ]
     ],
