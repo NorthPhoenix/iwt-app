@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { StatusBar } from "expo-status-bar"
 import {
   StyleSheet,
@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   Alert,
   Dimensions,
-  Keyboard,
 } from "react-native"
 import * as Notifications from "expo-notifications"
 import Svg, { Defs, RadialGradient, Stop, Circle } from "react-native-svg"
 import ConfettiCannon from "react-native-confetti-cannon"
+import TimerDisplay from "./src/components/TimerDisplay"
+import { useMMKVNumber } from "react-native-mmkv"
+import { storage } from "./src/localCache/mmkv"
 
 const { width, height } = Dimensions.get("window")
 
@@ -154,32 +156,27 @@ const PresetButton = ({ label, active, onPress }: PresetButtonProps) => {
 
 export default function App() {
   const [isTimerActive, setIsTimerActive] = useState(false)
-  const [notificationId, setNotificationId] = useState<string | null>(null)
-  const [customDuration, setCustomDuration] = useState("30") // Duration in minutes as string
   const [trainingDuration, setTrainingDuration] = useState(30 * 60) // Duration in seconds
   const [showConfetti, setShowConfetti] = useState(false)
-  const [isPausePrompt, setIsPausePrompt] = useState(false)
 
-  // High-precision timing state using the architecture from the article
-  const [startTime, setStartTime] = useState<number | null>(null)
-  const [pausedTime, setPausedTime] = useState<number>(0) // Total time paused in milliseconds
-  const [pauseStartTime, setPauseStartTime] = useState<number | null>(null)
-  const [timeRemaining, setTimeRemaining] = useState(30 * 60) // Current time remaining
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const lastTickRef = useRef<number | null>(null) // Reference time for the last tick
+  // const [timeRemaining, setTimeRemaining] = useState(30 * 60) // Current time remaining
+
+  // TimerDisplay wiring
+  const [isRunning, setIsRunning] = useState(false)
+  const [accumulatedMs, setAccumulatedMs] = useMMKVNumber(
+    "accumulatedMs",
+    storage,
+  )
+  const [durationMs, setDurationMs] = useState(30 * 60 * 1000)
+  const [startMonoMs, setStartMonoMs] = useMMKVNumber("startMonoMs", storage)
 
   // Derived countdown for the current 3-minute interval
-  const elapsedSeconds = trainingDuration - timeRemaining
-  const currentIntervalRemaining =
-    timeRemaining === 0
-      ? 0
-      : elapsedSeconds % 180 === 0
-        ? 180
-        : 180 - (elapsedSeconds % 180)
-  const currentIntervalIndex = Math.floor(elapsedSeconds / 180) + 1
-  const intervalKindLabel = currentIntervalIndex % 2 === 1 ? "Relaxed" : "Fast"
-  const intervalsLeft = Math.ceil(timeRemaining / 180)
+  // const elapsedSeconds = trainingDuration - timeRemaining
+  // const currentIntervalIndex = Math.floor(elapsedSeconds / 180) + 1
+  // const intervalKindLabel = currentIntervalIndex % 2 === 1 ? "Relaxed" : "Fast"
+  // const intervalsLeft = Math.ceil(timeRemaining / 180)
 
+  // On app start setup
   useEffect(() => {
     // Request notification permissions
     requestNotificationPermissions()
@@ -191,146 +188,22 @@ export default function App() {
       },
     )
 
+    // clean all mmkv data
+    storage.clearAll()
+
     return () => subscription.remove()
   }, [])
 
-  const sendIntervalNotification = useCallback(
-    async (elapsedSeconds: number) => {
-      const minutes = Math.floor(elapsedSeconds / 60)
-      const totalMinutes = Math.floor(trainingDuration / 60)
-      let message = ""
-
-      if (minutes === 3) {
-        message = "Great start! Keep walking!"
-      } else if (minutes === 6) {
-        message = "Halfway through your first interval!"
-      } else if (minutes === Math.floor(totalMinutes / 2)) {
-        message = `Halfway through your ${totalMinutes}-minute session!`
-      } else if (minutes === totalMinutes - 3) {
-        message = "Almost there! Keep pushing!"
-      } else {
-        message = `Keep going! ${minutes} minutes completed.`
-      }
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Interval Walking Training",
-          body: message,
-          sound: true,
-          priority: Notifications.AndroidNotificationPriority.HIGH,
-        },
-        trigger: null, // Send immediately
-      })
-    },
-    [trainingDuration],
-  )
-
-  const handleTimerComplete = useCallback(async () => {
-    setIsTimerActive(false)
-
-    // Clear any pending timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    // Reset all timing state
-    setStartTime(null)
-    setPausedTime(0)
-    setPauseStartTime(null)
-    setTimeRemaining(trainingDuration)
-    lastTickRef.current = null
-
-    const totalMinutes = Math.floor(trainingDuration / 60)
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Training Complete!",
-        body: `Congratulations! You've completed your ${totalMinutes}-minute interval walking training.`,
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: null,
-    })
-    setShowConfetti(true)
-  }, [trainingDuration])
-
-  // High-precision timer tick function using setTimeout with dynamic intervals
-  const tick = useCallback(() => {
-    if (!isTimerActive || !startTime) return
-
-    const now = Date.now()
-
-    // Calculate actual elapsed time since timer started
-    const totalElapsedMs = now - startTime - pausedTime
-    const totalElapsedSeconds = Math.floor(totalElapsedMs / 1000)
-    const newTimeRemaining = Math.max(0, trainingDuration - totalElapsedSeconds)
-
-    // Update time remaining
-    setTimeRemaining(newTimeRemaining)
-
-    // Handle completion
-    if (newTimeRemaining === 0) {
-      handleTimerComplete()
-      return
-    }
-
-    // Handle 3-minute interval notifications
-    if (totalElapsedSeconds > 0 && totalElapsedSeconds % 180 === 0) {
-      // Only send notification if we crossed a new 3-minute boundary
-      const currentInterval = Math.floor(totalElapsedSeconds / 180)
-      const previousElapsedSeconds = Math.floor((totalElapsedMs - 100) / 1000)
-      const previousInterval = Math.floor(previousElapsedSeconds / 180)
-
-      if (currentInterval > previousInterval) {
-        sendIntervalNotification(totalElapsedSeconds)
-      }
-    }
-
-    // Calculate when the next second should occur
-    const nextSecond = (totalElapsedSeconds + 1) * 1000
-    const targetTime = startTime + pausedTime + nextSecond
-
-    // Store reference time before scheduling timeout
-    lastTickRef.current = now
-
-    // Schedule next tick with dynamic interval
-    let delay = targetTime - now
-
-    // If we're behind schedule, catch up by using minimum delay
-    if (delay < 0) delay = 1
-
-    // Schedule the next tick
-    timeoutRef.current = setTimeout(tick, delay)
-  }, [
-    isTimerActive,
-    startTime,
-    pausedTime,
-    trainingDuration,
-    handleTimerComplete,
-    sendIntervalNotification,
-  ])
-
-  // Timer lifecycle management
-  useEffect(() => {
-    if (isTimerActive && startTime && timeRemaining > 0) {
-      // Start the timer
-      lastTickRef.current = Date.now()
-      tick()
-    } else {
-      // Clear any pending timeout
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-    }
-
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-    }
-  }, [isTimerActive, startTime, tick, timeRemaining])
+  // const requestExactAlarmPermissions = async () => {
+  //   // TODO
+  //   if (status !== "granted") {
+  //     Alert.alert(
+  //       "Permission Required",
+  //       "Please enable exact alarm permissions.",
+  //       [{ text: "OK" }],
+  //     )
+  //   }
+  // }
 
   const requestNotificationPermissions = async () => {
     const { status } = await Notifications.requestPermissionsAsync()
@@ -343,111 +216,41 @@ export default function App() {
     }
   }
 
-  const setPresetDuration = (minutes: string) => {
-    setCustomDuration(minutes)
-    setTrainingDuration(parseInt(minutes) * 60)
+  const setPresetDuration = (seconds: number) => {
+    setTrainingDuration(seconds)
+    setDurationMs(seconds * 1000)
   }
 
   const startTimer = async () => {
-    const duration = parseInt(customDuration)
-    if (isNaN(duration) || duration < 5 || duration > 120) {
-      Alert.alert(
-        "Invalid Duration",
-        "Please enter a duration between 5 and 120 minutes.",
-        [{ text: "OK" }],
-      )
-      return
-    }
-
-    Keyboard.dismiss()
-
-    // Initialize timer state
-    const durationSeconds = duration * 60
-    setTrainingDuration(durationSeconds)
-    setTimeRemaining(durationSeconds)
-
-    // Initialize high-precision timing
-    const now = Date.now()
-    setStartTime(now)
-    setPausedTime(0)
-    setPauseStartTime(null)
-
-    // Clear any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    // Start the timer
+    // Minimal start wiring for TimerDisplay
     setIsTimerActive(true)
-
-    // Schedule initial notification
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Interval Walking Training Started!",
-        body: `Your ${duration}-minute training session has begun. You'll be notified every 3 minutes.`,
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: null, // Send immediately
-    })
-    setNotificationId(id)
+    // setTimeRemaining(trainingDuration)
+    setAccumulatedMs(0)
+    setDurationMs(trainingDuration * 1000)
+    setStartMonoMs(performance.now())
+    setIsRunning(true)
   }
 
   const stopTimer = () => {
-    // Pause the timer
-    setIsTimerActive(false)
-    setIsPausePrompt(true)
-    setPauseStartTime(Date.now())
-
-    // Clear the current timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
+    // Prompt pause; freeze elapsed
+    setIsRunning(false)
+    if (startMonoMs != null) {
+      const now = performance.now()
+      setAccumulatedMs((prev) => (prev ?? 0) + (now - startMonoMs))
+      setStartMonoMs(undefined)
     }
   }
 
   const continueTraining = () => {
-    setIsPausePrompt(false)
-
-    // Add the time spent paused to our pausedTime accumulator
-    if (pauseStartTime !== null) {
-      const now = Date.now()
-      const timePausedMs = now - pauseStartTime
-      setPausedTime((prev) => prev + timePausedMs)
-      setPauseStartTime(null)
-    }
-
-    // Resume the timer
-    setIsTimerActive(true)
+    setStartMonoMs(performance.now())
+    setIsRunning(true)
   }
 
   const endTraining = () => {
-    setIsPausePrompt(false)
     setIsTimerActive(false)
-
-    // Clear any pending timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    // Reset all timing state
-    setStartTime(null)
-    setPausedTime(0)
-    setPauseStartTime(null)
-    setTimeRemaining(trainingDuration)
-    lastTickRef.current = null
-
-    if (notificationId) {
-      Notifications.dismissNotificationAsync(notificationId)
-      setNotificationId(null)
-    }
-  }
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = seconds % 60
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`
+    setIsRunning(false)
+    setAccumulatedMs(0)
+    setStartMonoMs(undefined)
   }
 
   return (
@@ -460,15 +263,15 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.title}>Interval Walking</Text>
         <Text style={styles.subtitle}>
-          {isTimerActive || isPausePrompt
+          {isTimerActive
             ? `${Math.floor(trainingDuration / 60)}-Minute Training`
             : "Choose Duration"}
         </Text>
       </View>
 
-      {isTimerActive || isPausePrompt ? (
+      {isTimerActive ? (
         <View style={styles.timerContainer}>
-          {intervalsLeft > 1 && (
+          {/* {intervalsLeft > 1 && (
             <>
               <View style={styles.totalRow}>
                 <Text style={styles.smallTimerText}>
@@ -480,14 +283,23 @@ export default function App() {
               </View>
               <Text style={styles.smallTimerLabel}>Total Remaining</Text>
             </>
-          )}
+          )} */}
 
-          <Text style={styles.timerText}>
-            {formatTime(currentIntervalRemaining)}
-          </Text>
-          <Text style={styles.intervalKindLabel}>{intervalKindLabel}</Text>
+          <TimerDisplay
+            durationMs={durationMs}
+            accumulatedMs={accumulatedMs ?? 0}
+            isRunning={isRunning}
+            startMonoMs={startMonoMs}
+            onDone={() => {
+              setIsRunning(false)
+              setIsTimerActive(false)
+              setShowConfetti(true)
+            }}
+            style={styles.timerText}
+          />
+          {/* <Text style={styles.intervalKindLabel}>{intervalKindLabel}</Text> */}
 
-          {isPausePrompt ? (
+          {!isRunning ? (
             <View style={styles.actionButtonsRow}>
               <TouchableOpacity style={styles.stopButton} onPress={endTraining}>
                 <View style={styles.stopButtonGradient}>
@@ -546,18 +358,18 @@ export default function App() {
           <View style={styles.presetButtonsContainer}>
             <PresetButton
               label="15m"
-              active={customDuration === "15"}
-              onPress={() => setPresetDuration("15")}
+              active={trainingDuration === 15 * 60}
+              onPress={() => setPresetDuration(15 * 60)}
             />
             <PresetButton
               label="30m"
-              active={customDuration === "30"}
-              onPress={() => setPresetDuration("30")}
+              active={trainingDuration === 30 * 60}
+              onPress={() => setPresetDuration(30 * 60)}
             />
             <PresetButton
               label="60m"
-              active={customDuration === "60"}
-              onPress={() => setPresetDuration("60")}
+              active={trainingDuration === 60 * 60}
+              onPress={() => setPresetDuration(60 * 60)}
             />
           </View>
         </View>
