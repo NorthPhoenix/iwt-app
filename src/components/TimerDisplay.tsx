@@ -1,4 +1,4 @@
-// TimerDisplay renders a high-precision mm:ss.SSS timer label using Reanimated.
+// TimerDisplay renders a high-precision mm:ss.SS timer label using Reanimated.
 // All frequent updates happen on the UI thread to avoid React re-renders.
 // This file documents every line to clarify behavior and threading model.
 
@@ -6,32 +6,23 @@ import React, { useEffect } from "react"
 // Import base Text component; we'll wrap it with Reanimated to update without React state
 import { Text } from "react-native"
 // Import Reanimated primitives used for UI-thread animations and shared state
-import Animated, {
-  useAnimatedProps,
-  useFrameCallback,
-  useSharedValue,
-} from "react-native-reanimated"
+import { useFrameCallback, useSharedValue } from "react-native-reanimated"
 // Import a helper to schedule a callback back on the React Native (JS) thread from a worklet
 import { scheduleOnRN } from "react-native-worklets"
+import dayjs from "dayjs"
+import duration from "dayjs/plugin/duration"
 
-// Create an Animated version of Text so we can bind animatedProps without React re-rendering
-const AnimatedText = Animated.createAnimatedComponent(Text)
+dayjs.extend(duration)
+
 /**
  * formatMs
- * Formats a millisecond count as mm:ss.SSS. Runs on the UI thread (worklet).
+ * Formats a millisecond count as mm:ss.SS using dayjs duration utilities.
  * @param ms - Milliseconds to format; negative values are clamped to 0.
  */
 function formatMs(ms: number) {
-  "worklet" // Marks this function as a Reanimated worklet (executes on the UI thread)
-  const clamped = ms < 0 ? 0 : ms // Prevent negative display
-  const totalSeconds = Math.floor(clamped / 1000) // Convert ms to whole seconds
-  const m = Math.floor(totalSeconds / 60) // Extract minutes component
-  const s = totalSeconds % 60 // Extract seconds remainder
-  const ms3 = clamped % 1000 // Extract the 0-999 millisecond remainder
-  // Cheap zero-padding helpers to avoid allocations from toLocale* APIs
-  const pad2 = (n: number) => (n < 10 ? "0" + n : "" + n)
-  const pad3 = (n: number) => (n < 10 ? "00" + n : n < 100 ? "0" + n : "" + n)
-  return `${pad2(m)}:${pad2(s)}.${pad3(ms3)}` // Compose mm:ss.SSS
+  const clamped = ms < 0 ? 0 : ms
+  const d = dayjs.duration(clamped, "milliseconds")
+  return d.format("mm:ss.SSS")
 }
 
 /**
@@ -126,19 +117,13 @@ export default function TimerDisplay(props: Props) {
   })
 
   // animatedProps maps shared values to Text's displayed string without causing a React re-render.
-  const animatedProps = useAnimatedProps(() => {
-    const elapsedForRender = renderElapsedSV.value
-    const remaining = Math.max(0, durationSV.value - elapsedForRender)
-    const label = showRemaining
-      ? formatMs(remaining)
-      : formatMs(elapsedForRender)
-    return { text: label }
-  })
+
+  const elapsedForRender = renderElapsedSV.value
+  const remaining = Math.max(0, durationSV.value - elapsedForRender)
+  const label = showRemaining ? formatMs(remaining) : formatMs(elapsedForRender)
 
   return (
-    <AnimatedText
-      // @ts-ignore animated text prop trick
-      animatedProps={animatedProps}
+    <Text
       style={[
         {
           // Use monospaced numeral glyphs to prevent label width from shifting as digits change
@@ -150,10 +135,7 @@ export default function TimerDisplay(props: Props) {
         style,
       ]}
     >
-      {/* Fallback initial label shown before animatedProps paints the first frame */}
-      {formatMs(
-        showRemaining ? Math.max(0, durationMs - accumulatedMs) : accumulatedMs,
-      )}
-    </AnimatedText>
+      {label}
+    </Text>
   )
 }
