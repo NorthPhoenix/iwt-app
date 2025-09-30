@@ -14,6 +14,7 @@ import ConfettiCannon from "react-native-confetti-cannon"
 import TimerDisplay from "./src/components/TimerDisplay"
 import { useMMKVNumber } from "react-native-mmkv"
 import { storage } from "./src/localCache/mmkv"
+import { BlurView } from "expo-blur"
 
 const { width, height } = Dimensions.get("window")
 
@@ -90,14 +91,12 @@ const BlobBackground = () => {
         initialX={width}
         initialY={height}
       />
-
-      {/* Expo blur overlay for production app */}
-      {/* <BlurView
+      <BlurView
         intensity={80}
         tint="dark"
         experimentalBlurMethod="dimezisBlurView"
         style={styles.blurOverlay}
-      /> */}
+      />
     </View>
   )
 }

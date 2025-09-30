@@ -4,25 +4,31 @@
 
 import React, { useEffect } from "react"
 // Import base Text component; we'll wrap it with Reanimated to update without React state
-import { Text } from "react-native"
+import { Animated } from "react-native"
 // Import Reanimated primitives used for UI-thread animations and shared state
-import { useFrameCallback, useSharedValue } from "react-native-reanimated"
+import {
+  useAnimatedProps,
+  useFrameCallback,
+  useSharedValue,
+} from "react-native-reanimated"
 // Import a helper to schedule a callback back on the React Native (JS) thread from a worklet
 import { scheduleOnRN } from "react-native-worklets"
-import dayjs from "dayjs"
-import duration from "dayjs/plugin/duration"
-
-dayjs.extend(duration)
+import { AnimatedTextInput } from "./AnimatedTextInput"
 
 /**
  * formatMs
- * Formats a millisecond count as mm:ss.SS using dayjs duration utilities.
+ * Formats a millisecond count as mm:ss using a worklet-safe formatter.
  * @param ms - Milliseconds to format; negative values are clamped to 0.
  */
 function formatMs(ms: number) {
+  "worklet"
   const clamped = ms < 0 ? 0 : ms
-  const d = dayjs.duration(clamped, "milliseconds")
-  return d.format("mm:ss.SSS")
+  const totalSeconds = Math.floor(clamped / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const mm = minutes < 10 ? `0${minutes}` : `${minutes}`
+  const ss = seconds < 10 ? `0${seconds}` : `${seconds}`
+  return `${mm}:${ss}`
 }
 
 /**
@@ -117,13 +123,19 @@ export default function TimerDisplay(props: Props) {
   })
 
   // animatedProps maps shared values to Text's displayed string without causing a React re-render.
-
-  const elapsedForRender = renderElapsedSV.value
-  const remaining = Math.max(0, durationSV.value - elapsedForRender)
-  const label = showRemaining ? formatMs(remaining) : formatMs(elapsedForRender)
-
+  const animatedProps = useAnimatedProps(() => {
+    const elapsedForRender = renderElapsedSV.value
+    const remaining = Math.max(0, durationSV.value - elapsedForRender)
+    const label = showRemaining
+      ? formatMs(remaining)
+      : formatMs(elapsedForRender)
+    return {
+      text: label,
+      defaultValue: label,
+    }
+  })
   return (
-    <Text
+    <Animated.View
       style={[
         {
           // Use monospaced numeral glyphs to prevent label width from shifting as digits change
@@ -135,7 +147,11 @@ export default function TimerDisplay(props: Props) {
         style,
       ]}
     >
-      {label}
-    </Text>
+      <AnimatedTextInput
+        underlineColorAndroid="transparent"
+        editable={false}
+        animatedProps={animatedProps}
+      />
+    </Animated.View>
   )
 }
