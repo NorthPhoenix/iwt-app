@@ -4,16 +4,17 @@
 
 import React, { useEffect } from "react"
 // Import base Text component; we'll wrap it with Reanimated to update without React state
-import { Animated } from "react-native"
+import { Text, TextInput, View } from "react-native"
 // Import Reanimated primitives used for UI-thread animations and shared state
-import {
+import Animated, {
   useAnimatedProps,
   useFrameCallback,
   useSharedValue,
 } from "react-native-reanimated"
 // Import a helper to schedule a callback back on the React Native (JS) thread from a worklet
 import { scheduleOnRN } from "react-native-worklets"
-import { AnimatedTextInput } from "./AnimatedTextInput"
+
+export const AnimatedTextInput = Animated.createAnimatedComponent(TextInput)
 
 /**
  * formatMs
@@ -26,9 +27,9 @@ function formatMs(ms: number) {
   const totalSeconds = Math.floor(clamped / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  const mm = minutes < 10 ? `0${minutes}` : `${minutes}`
-  const ss = seconds < 10 ? `0${seconds}` : `${seconds}`
-  return `${mm}:${ss}`
+  const paddedMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`
+  const paddedSeconds = seconds < 10 ? `0${seconds}` : `${seconds}`
+  return `${paddedMinutes}:${paddedSeconds}`
 }
 
 /**
@@ -48,7 +49,6 @@ type Props = {
   startMonoMs?: number
   onDone?: () => void
   showRemaining?: boolean
-  style?: any
 }
 
 // Functional component that renders a text label updated every frame on the UI thread
@@ -60,7 +60,6 @@ export default function TimerDisplay(props: Props) {
     startMonoMs,
     onDone,
     showRemaining = true,
-    style,
   } = props
 
   // baseElapsedSV stores the base elapsed milliseconds at the start of the current running segment.
@@ -123,7 +122,7 @@ export default function TimerDisplay(props: Props) {
   })
 
   // animatedProps maps shared values to Text's displayed string without causing a React re-render.
-  const animatedProps = useAnimatedProps(() => {
+  const mainTimerAnimatedProps = useAnimatedProps(() => {
     const elapsedForRender = renderElapsedSV.value
     const remaining = Math.max(0, durationSV.value - elapsedForRender)
     const label = showRemaining
@@ -134,23 +133,55 @@ export default function TimerDisplay(props: Props) {
       defaultValue: label,
     }
   })
+  const sentiSecondsAnimatedProps = useAnimatedProps(() => {
+    const elapsedForRender = renderElapsedSV.value
+    const remaining = Math.max(0, durationSV.value - elapsedForRender)
+    const sentiseconds = Math.floor((remaining % 1000) / 10)
+    const paddedSentiseconds =
+      sentiseconds < 10 ? `.0${sentiseconds}` : `.${sentiseconds}`
+    return {
+      text: paddedSentiseconds,
+      defaultValue: paddedSentiseconds,
+    }
+  })
   return (
     <Animated.View
-      style={[
-        {
-          // Use monospaced numeral glyphs to prevent label width from shifting as digits change
-          fontVariant: ["tabular-nums"],
-          fontSize: 48,
-          fontWeight: "600",
-          color: "#ffffff",
-        },
-        style,
-      ]}
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "flex-end",
+      }}
     >
       <AnimatedTextInput
         underlineColorAndroid="transparent"
         editable={false}
-        animatedProps={animatedProps}
+        style={{
+          // Use monospaced numeral glyphs to prevent label width from shifting as digits change
+          fontVariant: ["tabular-nums"],
+          fontSize: 70,
+          fontWeight: "700",
+          color: "#ffffff",
+          textAlign: "center",
+          letterSpacing: -1,
+          paddingRight: 0,
+        }}
+        animatedProps={mainTimerAnimatedProps}
+      />
+      <AnimatedTextInput
+        underlineColorAndroid="transparent"
+        editable={false}
+        style={{
+          // Use monospaced numeral glyphs to prevent label width from shifting as digits change
+          fontVariant: ["tabular-nums"],
+          fontSize: 40,
+          fontWeight: "700",
+          color: "#ffffff",
+          textAlign: "left",
+          letterSpacing: -1,
+          marginBottom: 10,
+          paddingLeft: 0,
+        }}
+        animatedProps={sentiSecondsAnimatedProps}
       />
     </Animated.View>
   )

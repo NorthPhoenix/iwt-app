@@ -294,7 +294,6 @@ export default function App() {
               setIsTimerActive(false)
               setShowConfetti(true)
             }}
-            style={styles.timerText}
           />
           {/* <Text style={styles.intervalKindLabel}>{intervalKindLabel}</Text> */}
 
@@ -599,13 +598,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flex: 1,
     zIndex: 10,
-  },
-  timerText: {
-    fontSize: 72,
-    fontWeight: "700",
-    color: "#ffffff",
-    textAlign: "center",
-    letterSpacing: -1,
   },
   smallTimerText: {
     fontSize: 22,
